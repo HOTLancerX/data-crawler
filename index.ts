@@ -8,7 +8,7 @@ export const PLUGINS: PluginMeta = {
     description: "Sitemap data crawler and dynamic XPath scraper with text/gallery extraction and JSON export.",
     author: "System",
     path: "https://github.com/HOTLancerX/data-crawler.git",
-    icon: "solar:spider-bold",
+    icon: "carbon:cloud-data-ops",
     color: "from-amber-500 to-orange-600",
 };
 
@@ -18,7 +18,7 @@ export function register() {
         {
             key: "data-crawler",
             label: "Data Crawler",
-            icon: "solar:spider-bold",
+            icon: "carbon:cloud-data-ops",
             slug: "data-crawler",
             parent: "",
             position: 28,

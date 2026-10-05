@@ -3,8 +3,6 @@
 import React, { useState } from 'react';
 import { Icon } from '@iconify/react';
 import { DynamicField, FieldType, UrlItem } from '@/plugin/data-crawler/types/scraper';
-import { PRESETS } from '@/plugin/data-crawler/lib/presets';
-import VisualSelectorModal from '@/plugin/data-crawler/components/VisualSelectorModal';
 
 interface Step3XPathConfigProps {
   fields: DynamicField[];
@@ -65,7 +63,6 @@ export default function Step3XPathConfig({
   const [testErrors, setTestErrors] = useState<Record<string, string> | null>(null);
   const [testDuration, setTestDuration] = useState<number | null>(null);
   const [showTips, setShowTips] = useState(false);
-  const [isVisualModalOpen, setIsVisualModalOpen] = useState(false);
 
   const addField = () => {
     const newId = 'field_' + Date.now();
@@ -96,18 +93,6 @@ export default function Step3XPathConfig({
     setFields((prev) => prev.map((f) => (f.id === id ? { ...f, ...updates } : f)));
   };
 
-  const loadPreset = (presetId: string) => {
-    const preset = PRESETS.find((p) => p.id === presetId);
-    if (preset) {
-      setFields(
-        preset.fields.map((f) => ({
-          ...f,
-          id: 'field_' + Math.random().toString(36).substring(2, 9),
-        }))
-      );
-      setTestResults(null);
-    }
-  };
 
   const generalizeXPath = (xpathStr: string) => {
     const idMatch = xpathStr.match(/@id=["']([^"']*\d+[^"']*)["']/);
@@ -230,50 +215,24 @@ export default function Step3XPathConfig({
             </p>
           </div>
 
-          {/* Preset Buttons */}
-          <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
-            <span className="text-xs text-gray-500 font-medium mr-1 flex items-center gap-1">
-              <Icon icon="solar:stars-minimalistic-bold" className="w-3.5 h-3.5 text-amber-500" />
-              Presets:
-            </span>
-            <button
-              type="button"
-              onClick={() => loadPreset('avechi-sample')}
-              className="text-xs bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 px-3 py-1.5 rounded-lg transition-colors font-medium cursor-pointer"
-            >
-              Avechi Example
-            </button>
-            <button
-              type="button"
-              onClick={() => loadPreset('woocommerce-generic')}
-              className="text-xs bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-            >
-              E-Commerce Store
-            </button>
-            <button
-              type="button"
-              onClick={() => loadPreset('blog-article')}
-              className="text-xs bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-            >
-              Article / Blog
-            </button>
-
+          <div className="flex items-center gap-3 self-start md:self-auto">
             <button
               type="button"
               onClick={splitMainImageAndGallery}
-              className="text-xs bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 px-3 py-1.5 rounded-lg transition-colors font-medium cursor-pointer flex items-center gap-1.5"
+              className="text-xs bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 px-3.5 py-2.5 rounded-xl transition-colors font-medium cursor-pointer flex items-center gap-1.5"
             >
-              <Icon icon="solar:gallery-bold" className="w-3.5 h-3.5 text-amber-500" />
-              Split Main &amp; Gallery
+              <Icon icon="solar:gallery-bold" className="w-4 h-4 text-amber-500" />
+              <span>Split Main &amp; Gallery</span>
             </button>
 
             <button
               type="button"
-              onClick={() => setIsVisualModalOpen(true)}
-              className="text-xs bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-3 py-1.5 rounded-lg transition-colors font-medium cursor-pointer flex items-center gap-1.5"
+              onClick={onNext}
+              disabled={fields.length === 0}
+              className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white px-5 py-2.5 rounded-xl font-semibold shadow-md shadow-blue-600/20 transition-all cursor-pointer disabled:cursor-not-allowed text-xs"
             >
-              <Icon icon="solar:stars-minimalistic-bold" className="w-3.5 h-3.5 text-emerald-600" />
-              Visual Inspector
+              <span>Next: Start Scraping (Step 4)</span>
+              <Icon icon="solar:arrow-right-bold" className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -677,15 +636,6 @@ export default function Step3XPathConfig({
           <Icon icon="solar:arrow-right-bold" className="w-4 h-4" />
         </button>
       </div>
-
-      {/* Visual Element Selector & Gallery Splitter Modal */}
-      <VisualSelectorModal
-        isOpen={isVisualModalOpen}
-        onClose={() => setIsVisualModalOpen(false)}
-        sampleUrl={testSampleUrl}
-        onApplyFields={(newFields) => setFields(newFields)}
-        currentFields={fields}
-      />
     </div>
   );
 }
