@@ -7,7 +7,6 @@ import Step2UrlList from '@/plugin/data-crawler/components/Step2UrlList';
 import Step3XPathConfig from '@/plugin/data-crawler/components/Step3XPathConfig';
 import Step4ScrapeResults from '@/plugin/data-crawler/components/Step4ScrapeResults';
 import { DynamicField, ScraperStep, UrlItem } from '@/plugin/data-crawler/types/scraper';
-import { PRESETS } from '@/plugin/data-crawler/lib/presets';
 import { Icon } from '@iconify/react';
 
 export default function DataCrawlerAdminPage() {
@@ -17,11 +16,23 @@ export default function DataCrawlerAdminPage() {
   const [urls, setUrls] = useState<UrlItem[]>([]);
   const [isLoadingSitemap, setIsLoadingSitemap] = useState<boolean>(false);
 
-  // Initial fields loaded from user's Avechi preset
-  const [fields, setFields] = useState<DynamicField[]>(() => {
-    const avechiPreset = PRESETS[0];
-    return avechiPreset ? avechiPreset.fields : [];
-  });
+  // Default initial fields (Title & Gallery)
+  const [fields, setFields] = useState<DynamicField[]>([
+    {
+      id: 'field_title',
+      name: 'title',
+      xpath: '//*[@id="product-17379"]/div[2]/h1 | //h1[contains(@class, "product_title")] | //h1',
+      type: 'text',
+      required: true,
+    },
+    {
+      id: 'field_gallery',
+      name: 'gallery',
+      xpath: '//*[@id="product-17379"]/div[1]/ol | //ol[contains(@class, "flex-control-thumbs")]',
+      type: 'image_list',
+      excludeFirstImage: false,
+    },
+  ]);
 
   // When sitemap URLs are successfully loaded in Step 1
   const handleSitemapLoaded = (loadedUrls: string[], source: string) => {
