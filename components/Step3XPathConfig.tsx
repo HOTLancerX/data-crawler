@@ -13,30 +13,30 @@ interface Step3XPathConfigProps {
 }
 
 const FIELD_TYPES: { value: FieldType; label: string; icon: string; hint: string }[] = [
-  { value: 'text', label: 'Text (String)', icon: 'solar:text-field-bold', hint: 'Extracts clean inner text content' },
   {
     value: 'first_image_url',
-    label: 'First Image URL (e.g. "image")',
+    label: 'Main Image URL (1st Image)',
     icon: 'solar:gallery-bold',
-    hint: 'Extracts clean URL string like "https://.../3.jpg" from 1st gallery image',
+    hint: 'Extracts clean URL string for primary/main product image ("image": "https://.../1.jpg")',
   },
+  {
+    value: 'image_list',
+    label: 'Image List / Gallery (Array of URLs)',
+    icon: 'solar:gallery-wide-bold',
+    hint: 'Extracts all <img> URLs (or remaining gallery images when 1st is excluded)',
+  },
+  { value: 'text', label: 'Text (String)', icon: 'solar:text-field-bold', hint: 'Extracts clean inner text content' },
   {
     value: 'first_image_tag',
     label: 'First Image as <img> Tag',
     icon: 'solar:code-file-bold',
-    hint: 'Creates <img src="..." alt="..." /> using 1st image from gallery/container',
+    hint: 'Creates <img src="..." alt="..." /> using 1st image from container',
   },
   {
     value: 'gallery_remaining',
-    label: 'Gallery (Excluding 1st Image)',
+    label: 'Gallery (Excludes 1st Image)',
     icon: 'solar:gallery-wide-bold',
-    hint: 'Extracts array of image URLs excluding the 1st image',
-  },
-  {
-    value: 'image_list',
-    label: 'Image List (Array of URLs)',
-    icon: 'solar:gallery-bold',
-    hint: 'Extracts all <img> URLs from container (e.g. <ol> gallery)',
+    hint: 'Extracts remaining images (returns [] if product only has 1 image)',
   },
   { value: 'image_url', label: 'Single Image URL', icon: 'solar:gallery-bold', hint: 'Extracts primary image src' },
   { value: 'image_tag', label: 'Image as <img> Tag', icon: 'solar:code-file-bold', hint: 'Creates <img src="..." /> tag' },
@@ -121,37 +121,42 @@ export default function Step3XPathConfig({
   const splitMainImageAndGallery = () => {
     setFields((prev) => {
       const galleryField = prev.find(
-        (f) => f.type === 'image_list' || f.name.toLowerCase().includes('gallery')
+        (f) => f.name.toLowerCase().includes('gallery') || f.type === 'image_list' || f.type === 'gallery_remaining'
       );
       const galleryXPath =
         galleryField?.xpath ||
-        '//*[@id="product-17379"]/div[1]/ol | //ol[contains(@class, "flex-control-thumbs")]';
+        '//*[contains(@id, "product-")]/div[1]/ol | //*[contains(@id, "product-")]/div[1]';
 
-      const hasImageField = prev.some(
-        (f) => f.name === 'image' || f.type === 'first_image_url' || f.name === 'main_image_tag'
-      );
-
+      let hasImage = false;
       const updated = prev.map((f) => {
-        if (f.type === 'image_list' || f.name.toLowerCase().includes('gallery')) {
+        if (f.name.toLowerCase() === 'image' || f.name.toLowerCase().includes('main_img')) {
+          hasImage = true;
           return {
             ...f,
+            name: 'image',
+            type: 'first_image_url' as FieldType,
+            xpath: f.xpath || galleryXPath,
+          };
+        }
+        if (f.name.toLowerCase().includes('gallery')) {
+          return {
+            ...f,
+            name: 'gallery',
+            type: 'image_list' as FieldType,
             excludeFirstImage: true,
           };
         }
         return f;
       });
 
-      if (!hasImageField) {
-        const galleryIdx = updated.findIndex(
-          (f) => f.type === 'image_list' || f.name.toLowerCase().includes('gallery')
-        );
+      if (!hasImage) {
         const imageField: DynamicField = {
           id: 'field_image_' + Date.now(),
           name: 'image',
           xpath: galleryXPath,
           type: 'first_image_url',
         };
-
+        const galleryIdx = updated.findIndex((f) => f.name.toLowerCase().includes('gallery'));
         if (galleryIdx !== -1) {
           updated.splice(galleryIdx, 0, imageField);
         } else {

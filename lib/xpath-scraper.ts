@@ -1,5 +1,4 @@
-import { DOMParser } from '@xmldom/xmldom';
-import xpath from 'xpath';
+import { JSDOM } from 'jsdom';
 
 export interface XPathField {
   id: string;
@@ -20,26 +19,13 @@ export interface XPathField {
     | 'array_text'
     | 'number';
   attributeName?: string;
+  imgTagClass?: string;
   excludeFirstImage?: boolean;
   highResImages?: boolean;
   companionMainImageTag?: boolean;
   description?: string;
 }
 
-export interface ScrapeResult {
-  url: string;
-  success: boolean;
-  status?: number;
-  durationMs: number;
-  data: Record<string, any>;
-  errors?: Record<string, string>;
-  error?: string;
-  scrapedAt: string;
-}
-
-/**
- * Resolves a potentially relative URL against a base URL
- */
 export function resolveUrl(relativeOrAbsolute: string, baseUrl: string): string {
   try {
     return new URL(relativeOrAbsolute.trim(), baseUrl).href;
@@ -48,234 +34,125 @@ export function resolveUrl(relativeOrAbsolute: string, baseUrl: string): string 
   }
 }
 
-/**
- * Cleans thumbnail size suffixes (e.g. -300x300.jpg or -100x100.png) into clean full-resolution URLs (3.jpg)
- */
 export function cleanFullResUrl(url: string | null): string | null {
   if (!url) return null;
   return url.replace(/-\d+x\d+(\.[a-zA-Z0-9]+)(\?.*)?$/i, '$1$2');
 }
 
-/**
- * Builds an <img> HTML tag string with safe attribute escaping
- */
 export function buildImgTag(src: string, alt = '', className = ''): string {
-  const safeSrc = escapeHtmlAttr(src);
-  const safeAlt = escapeHtmlAttr(alt);
-  const classAttr = className ? ` class="${escapeHtmlAttr(className)}"` : '';
+  const safeSrc = (src || '').replace(/"/g, '&quot;');
+  const safeAlt = (alt || '').replace(/"/g, '&quot;');
+  const classAttr = className ? ` class="${className.replace(/"/g, '&quot;')}"` : '';
   return `<img src="${safeSrc}" alt="${safeAlt}"${classAttr} />`;
 }
 
-function escapeHtmlAttr(str: string): string {
-  return (str || '')
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
+function extractImageSrcFromElement(el: Element, baseUrl: string, highRes = true): string | null {
+  if (!el) return null;
+  const raw =
+    el.getAttribute('data-large_image') ||
+    el.getAttribute('data-full-src') ||
+    el.getAttribute('data-zoom-image') ||
+    el.getAttribute('data-original') ||
+    el.getAttribute('data-src') ||
+    el.getAttribute('data-lazy-src') ||
+    el.getAttribute('nitro-lazy-src') ||
+    el.getAttribute('src');
 
-/**
- * Sanitizes HTML so DOMParser can parse it reliably as XML.
- */
-function sanitizeHtml(html: string): string {
-  let clean = html
-    .replace(/<!DOCTYPE[^>]*>/gi, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
-    .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, '');
-
-  const voidTags = [
-    'img',
-    'input',
-    'br',
-    'hr',
-    'meta',
-    'link',
-    'source',
-    'wbr',
-    'area',
-    'base',
-    'col',
-    'embed',
-    'param',
-    'track',
-  ];
-  for (const tag of voidTags) {
-    const regex = new RegExp(`<(${tag}\\b[^>]*?)(?<!/)>`, 'gi');
-    clean = clean.replace(regex, '<$1 />');
+  if (raw && !raw.startsWith('data:')) {
+    const full = resolveUrl(raw, baseUrl);
+    return highRes ? cleanFullResUrl(full) || full : full;
   }
-
-  // Escape lone ampersands
-  clean = clean.replace(/&(?!(?:[a-zA-Z0-9]+|#[0-9]+|#x[0-9a-fA-F]+);)/g, '&amp;');
-
-  return `<root>${clean}</root>`;
-}
-
-/**
- * Extracts single image URL from a DOM node
- */
-function extractImgSrc(node: any, baseUrl: string, cleanFullRes = true): string | null {
-  if (!node) return null;
-
-  // If node is an element
-  if (node.nodeType === 1) {
-    const tagName = (node.tagName || node.nodeName || '').toLowerCase();
-    if (tagName === 'img') {
-      const raw =
-        node.getAttribute?.('data-large_image') ||
-        node.getAttribute?.('data-full-src') ||
-        node.getAttribute?.('data-zoom-image') ||
-        node.getAttribute?.('data-original') ||
-        node.getAttribute?.('data-src') ||
-        node.getAttribute?.('data-lazy-src') ||
-        node.getAttribute?.('nitro-lazy-src') ||
-        node.getAttribute?.('src');
-
-      if (raw && !raw.startsWith('data:')) {
-        const resolved = resolveUrl(raw, baseUrl);
-        return cleanFullRes ? cleanFullResUrl(resolved) || resolved : resolved;
-      }
-    }
-  }
-
-  // Check child nodes recursively
-  if (node.childNodes && node.childNodes.length > 0) {
-    for (let i = 0; i < node.childNodes.length; i++) {
-      const found = extractImgSrc(node.childNodes[i], baseUrl, cleanFullRes);
-      if (found) return found;
-    }
-  }
-
   return null;
 }
 
-/**
- * Recursively extracts all image URLs from a container node or list of nodes
- */
-function extractImageList(nodes: any[], baseUrl: string): string[] {
+function collectImagesFromNode(node: Node, baseUrl: string): string[] {
   const urls: string[] = [];
   const seen = new Set<string>();
 
-  const traverse = (node: any) => {
-    if (!node) return;
+  if (!node) return urls;
 
-    if (node.nodeType === 1) {
-      const tagName = (node.tagName || node.nodeName || '').toLowerCase();
-      if (tagName === 'img') {
-        const src = extractImgSrc(node, baseUrl);
+  if (node.nodeType === 1) {
+    const el = node as Element;
+    if (el.tagName.toLowerCase() === 'img') {
+      const src = extractImageSrcFromElement(el, baseUrl);
+      if (src && !seen.has(src)) {
+        seen.add(src);
+        urls.push(src);
+      }
+    } else {
+      const imgs = el.querySelectorAll('img');
+      imgs.forEach((img) => {
+        const src = extractImageSrcFromElement(img, baseUrl);
         if (src && !seen.has(src)) {
           seen.add(src);
           urls.push(src);
         }
-      } else if (tagName === 'a') {
-        const href = node.getAttribute?.('href');
-        if (href && /\.(jpg|jpeg|png|webp|avif)($|\?)/i.test(href)) {
-          const full = resolveUrl(href, baseUrl);
-          const clean = cleanFullResUrl(full) || full;
-          if (!seen.has(clean)) {
-            seen.add(clean);
-            urls.push(clean);
-          }
-        }
-      }
+      });
     }
-
-    if (node.childNodes && node.childNodes.length > 0) {
-      for (let i = 0; i < node.childNodes.length; i++) {
-        traverse(node.childNodes[i]);
-      }
-    }
-  };
-
-  for (const n of nodes) {
-    traverse(n);
   }
 
   return urls;
 }
 
-/**
- * Extracts first image details (src and alt)
- */
-function extractFirstImgDetails(
-  nodes: any[],
-  baseUrl: string,
-  doc: any
-): { src: string | null; alt: string } {
-  let fallbackH1 = '';
-  try {
-    const h1Nodes = xpath.select('//h1/text()', doc) as any[];
-    if (h1Nodes && h1Nodes.length > 0) {
-      fallbackH1 = (h1Nodes[0].nodeValue || h1Nodes[0].textContent || '').trim();
-    }
-  } catch {}
-
-  for (const node of nodes) {
-    if (!node) continue;
-    const src = extractImgSrc(node, baseUrl);
-    if (src) {
-      const alt =
-        (node.getAttribute ? node.getAttribute('alt') : null) || fallbackH1;
-      return { src, alt };
-    }
-  }
-
-  return { src: null, alt: fallbackH1 };
-}
-
-/**
- * Executes dynamic XPath extraction on HTML string
- */
 export function extractDataWithXPath(
   html: string,
   baseUrl: string,
   fields: XPathField[]
 ): { data: Record<string, any>; errors: Record<string, string> } {
-  const cleanXml = sanitizeHtml(html);
-
-  let doc: any;
-  try {
-    doc = new DOMParser({
-      onError: () => {},
-    }).parseFromString(cleanXml, 'text/xml');
-  } catch {
-    doc = null;
-  }
-
   const data: Record<string, any> = {};
   const errors: Record<string, string> = {};
 
-  if (!doc) {
+  let dom: JSDOM | null = null;
+  try {
+    dom = new JSDOM(html, {
+      url: baseUrl,
+      pretendToBeVisual: false,
+    });
+  } catch (err: any) {
     for (const field of fields) {
       data[field.name] = null;
-      errors[field.name] = 'Failed to parse HTML document';
+      errors[field.name] = err.message || 'Failed to parse HTML document';
     }
     return { data, errors };
   }
 
-  for (const field of fields) {
+  try {
+    const doc = dom.window.document;
+    const XPathResult = dom.window.XPathResult;
+
+    for (const field of fields) {
     if (!field.name || !field.xpath) continue;
 
     const trimmedXPath = field.xpath.trim();
 
     try {
-      let nodes: any[] = [];
-      try {
-        const res = xpath.select(trimmedXPath, doc);
-        nodes = Array.isArray(res) ? res : [res];
-      } catch (e: any) {
-        errors[field.name] = e.message || 'Invalid XPath expression';
-        data[field.name] = null;
-        continue;
+      let nodes: Node[] = [];
+
+      const evaluateXPath = (expr: string): Node[] => {
+        try {
+          const snapshot = doc.evaluate(expr, doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+          const list: Node[] = [];
+          for (let i = 0; i < snapshot.snapshotLength; i++) {
+            const item = snapshot.snapshotItem(i);
+            if (item) list.push(item);
+          }
+          return list;
+        } catch {
+          return [];
+        }
+      };
+
+      nodes = evaluateXPath(trimmedXPath);
+
+      // Smart fallback: if xpath ended with /ol (WooCommerce client-side slider) but raw HTML has div.woocommerce-product-gallery
+      if (nodes.length === 0 && trimmedXPath.includes('/ol')) {
+        const withoutOl = trimmedXPath.replace(/\/ol\b/, '');
+        nodes = evaluateXPath(withoutOl);
       }
 
-      if (!nodes || nodes.length === 0) {
+      if (nodes.length === 0) {
         data[field.name] =
-          field.type === 'image_list' ||
-          field.type === 'link_list' ||
-          field.type === 'array_text'
+          field.type === 'image_list' || field.type === 'gallery_remaining' || field.type === 'link_list' || field.type === 'array_text'
             ? []
             : null;
         continue;
@@ -294,33 +171,52 @@ export function extractDataWithXPath(
         }
 
         case 'html': {
-          data[field.name] =
-            firstNode.toString?.() || firstNode.textContent || null;
+          const el = firstNode as Element;
+          data[field.name] = el.outerHTML || el.textContent || null;
           break;
         }
 
         case 'first_image_url': {
-          const imgList = extractImageList(nodes, baseUrl);
-          let firstUrl =
-            imgList.length > 0 ? imgList[0] : extractImgSrc(firstNode, baseUrl);
-          if (firstUrl) {
-            firstUrl = cleanFullResUrl(firstUrl);
+          let foundSrc: string | null = null;
+          for (const n of nodes) {
+            const list = collectImagesFromNode(n, baseUrl);
+            if (list.length > 0) {
+              foundSrc = list[0];
+              break;
+            }
           }
-          data[field.name] = firstUrl;
+          data[field.name] = foundSrc;
           break;
         }
 
         case 'image_url': {
-          const src = extractImgSrc(firstNode, baseUrl);
-          data[field.name] = src;
+          let foundSrc: string | null = null;
+          for (const n of nodes) {
+            const list = collectImagesFromNode(n, baseUrl);
+            if (list.length > 0) {
+              foundSrc = list[0];
+              break;
+            }
+          }
+          data[field.name] = foundSrc;
           break;
         }
 
         case 'first_image_tag':
         case 'image_tag': {
-          const { src, alt } = extractFirstImgDetails(nodes, baseUrl, doc);
-          if (src) {
-            data[field.name] = buildImgTag(src, alt);
+          let foundSrc: string | null = null;
+          let alt = '';
+          for (const n of nodes) {
+            const list = collectImagesFromNode(n, baseUrl);
+            if (list.length > 0) {
+              foundSrc = list[0];
+              const el = n as Element;
+              alt = el.getAttribute?.('alt') || doc.querySelector('h1')?.textContent?.trim() || '';
+              break;
+            }
+          }
+          if (foundSrc) {
+            data[field.name] = buildImgTag(foundSrc, alt, field.imgTagClass);
           } else {
             data[field.name] = null;
           }
@@ -328,38 +224,57 @@ export function extractDataWithXPath(
         }
 
         case 'gallery_remaining': {
-          const imgList = extractImageList(nodes, baseUrl);
-          data[field.name] = imgList.length > 1 ? imgList.slice(1) : [];
+          const allImgs: string[] = [];
+          const seen = new Set<string>();
+          for (const n of nodes) {
+            const list = collectImagesFromNode(n, baseUrl);
+            for (const s of list) {
+              if (!seen.has(s)) {
+                seen.add(s);
+                allImgs.push(s);
+              }
+            }
+          }
+          data[field.name] = allImgs.length > 1 ? allImgs.slice(1) : [];
           break;
         }
 
         case 'image_list': {
-          const imgList = extractImageList(nodes, baseUrl);
-
-          if (field.excludeFirstImage) {
-            data[field.name] = imgList.length > 1 ? imgList.slice(1) : [];
-          } else {
-            data[field.name] = imgList;
+          const allImgs: string[] = [];
+          const seen = new Set<string>();
+          for (const n of nodes) {
+            const list = collectImagesFromNode(n, baseUrl);
+            for (const s of list) {
+              if (!seen.has(s)) {
+                seen.add(s);
+                allImgs.push(s);
+              }
+            }
           }
 
-          if (field.companionMainImageTag && imgList.length > 0) {
-            const firstSrc = imgList[0];
-            const { alt } = extractFirstImgDetails(nodes, baseUrl, doc);
+          if (field.excludeFirstImage) {
+            data[field.name] = allImgs.length > 1 ? allImgs.slice(1) : [];
+          } else {
+            data[field.name] = allImgs;
+          }
+
+          if (field.companionMainImageTag && allImgs.length > 0) {
+            const firstSrc = allImgs[0];
+            const alt = doc.querySelector('h1')?.textContent?.trim() || '';
             data[`${field.name}_main_img_tag`] = buildImgTag(firstSrc, alt);
           }
           break;
         }
 
         case 'link_url': {
-          let href = firstNode.getAttribute?.('href');
-          if (!href && firstNode.childNodes) {
-            for (let i = 0; i < firstNode.childNodes.length; i++) {
-              const c = firstNode.childNodes[i];
-              if (c.getAttribute && c.getAttribute('href')) {
-                href = c.getAttribute('href');
-                break;
-              }
-            }
+          let href: string | null = null;
+          const el = firstNode as Element;
+          if (el.getAttribute) {
+            href = el.getAttribute('href');
+          }
+          if (!href && el.querySelector) {
+            const a = el.querySelector('a');
+            if (a) href = a.getAttribute('href');
           }
           data[field.name] = href ? resolveUrl(href, baseUrl) : null;
           break;
@@ -368,37 +283,36 @@ export function extractDataWithXPath(
         case 'link_list': {
           const links: string[] = [];
           const seen = new Set<string>();
-
-          const collectLinks = (n: any) => {
-            if (!n) return;
-            if (n.nodeType === 1 && (n.tagName || n.nodeName || '').toLowerCase() === 'a') {
-              const h = n.getAttribute?.('href');
-              if (h) {
-                const full = resolveUrl(h, baseUrl);
-                if (!seen.has(full)) {
-                  seen.add(full);
-                  links.push(full);
-                }
-              }
-            }
-            if (n.childNodes && n.childNodes.length > 0) {
-              for (let i = 0; i < n.childNodes.length; i++) {
-                collectLinks(n.childNodes[i]);
-              }
-            }
-          };
-
           for (const n of nodes) {
-            collectLinks(n);
+            const el = n as Element;
+            if (el.tagName?.toLowerCase() === 'a' && el.getAttribute?.('href')) {
+              const full = resolveUrl(el.getAttribute('href')!, baseUrl);
+              if (!seen.has(full)) {
+                seen.add(full);
+                links.push(full);
+              }
+            }
+            if (el.querySelectorAll) {
+              el.querySelectorAll('a').forEach((a) => {
+                const h = a.getAttribute('href');
+                if (h) {
+                  const full = resolveUrl(h, baseUrl);
+                  if (!seen.has(full)) {
+                    seen.add(full);
+                    links.push(full);
+                  }
+                }
+              });
+            }
           }
-
           data[field.name] = links;
           break;
         }
 
         case 'attribute': {
           const attr = field.attributeName || 'href';
-          const val = firstNode.getAttribute ? firstNode.getAttribute(attr) : null;
+          const el = firstNode as Element;
+          const val = el.getAttribute ? el.getAttribute(attr) : null;
           data[field.name] = val;
           break;
         }
@@ -406,16 +320,14 @@ export function extractDataWithXPath(
         case 'array_text': {
           const texts: string[] = [];
           for (const n of nodes) {
-            if (n.childNodes && n.childNodes.length > 0) {
-              for (let i = 0; i < n.childNodes.length; i++) {
-                const child = n.childNodes[i];
-                if (child.nodeType === 1) {
-                  const t = (child.textContent || child.nodeValue || '').trim();
-                  if (t) texts.push(t);
-                }
-              }
+            const el = n as Element;
+            if (el.children && el.children.length > 0) {
+              Array.from(el.children).forEach((child) => {
+                const t = child.textContent?.trim();
+                if (t) texts.push(t);
+              });
             } else {
-              const t = (n.textContent || n.nodeValue || '').trim();
+              const t = el.textContent?.trim();
               if (t) texts.push(t);
             }
           }
@@ -445,6 +357,86 @@ export function extractDataWithXPath(
       data[field.name] = null;
     }
   }
+} finally {
+  if (dom && dom.window) {
+    dom.window.close();
+  }
+}
 
   return { data, errors };
+}
+
+export async function scrapeUrlWithXPath(
+  url: string,
+  fields: XPathField[],
+  timeoutMs = 25000
+): Promise<{
+  url: string;
+  success: boolean;
+  status: number;
+  durationMs: number;
+  data: Record<string, any>;
+  errors: Record<string, string>;
+  error?: string;
+  scrapedAt: string;
+}> {
+  const startTime = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    });
+
+    clearTimeout(timer);
+    const durationMs = Date.now() - startTime;
+
+    if (!res.ok) {
+      return {
+        url,
+        success: false,
+        status: res.status,
+        durationMs,
+        data: {},
+        errors: { _http: `HTTP Error ${res.status}: ${res.statusText}` },
+        error: `HTTP ${res.status} ${res.statusText}`,
+        scrapedAt: new Date().toISOString(),
+      };
+    }
+
+    const html = await res.text();
+    const { data, errors } = extractDataWithXPath(html, url, fields);
+
+    return {
+      url,
+      success: Object.keys(errors).length === 0,
+      status: res.status,
+      durationMs,
+      data,
+      errors,
+      scrapedAt: new Date().toISOString(),
+    };
+  } catch (err: any) {
+    clearTimeout(timer);
+    const durationMs = Date.now() - startTime;
+    const isTimeout = err.name === 'AbortError';
+
+    return {
+      url,
+      success: false,
+      status: isTimeout ? 408 : 500,
+      durationMs,
+      data: {},
+      errors: { _general: isTimeout ? 'Request timed out' : err.message },
+      error: isTimeout ? 'Request timed out' : err.message,
+      scrapedAt: new Date().toISOString(),
+    };
+  }
 }

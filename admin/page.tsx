@@ -16,21 +16,28 @@ export default function DataCrawlerAdminPage() {
   const [urls, setUrls] = useState<UrlItem[]>([]);
   const [isLoadingSitemap, setIsLoadingSitemap] = useState<boolean>(false);
 
-  // Default initial fields (Title & Gallery)
+  // Default initial fields (Title, Main Image, Gallery)
   const [fields, setFields] = useState<DynamicField[]>([
     {
       id: 'field_title',
       name: 'title',
-      xpath: '//*[@id="product-17379"]/div[2]/h1 | //h1[contains(@class, "product_title")] | //h1',
+      xpath: '//*[contains(@id, "product-")]/div[2]/h1 | //h1[contains(@class, "product_title")] | //h1',
       type: 'text',
+      required: true,
+    },
+    {
+      id: 'field_image',
+      name: 'image',
+      xpath: '//*[contains(@id, "product-")]/div[1]/ol | //*[contains(@id, "product-")]/div[1]',
+      type: 'first_image_url',
       required: true,
     },
     {
       id: 'field_gallery',
       name: 'gallery',
-      xpath: '//*[@id="product-17379"]/div[1]/ol | //ol[contains(@class, "flex-control-thumbs")]',
+      xpath: '//*[contains(@id, "product-")]/div[1]/ol | //*[contains(@id, "product-")]/div[1]',
       type: 'image_list',
-      excludeFirstImage: false,
+      excludeFirstImage: true,
     },
   ]);
 
